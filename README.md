@@ -11,10 +11,11 @@ Live app: [bankinsightsapppy-hewucidkqvbxdmstv84vyu.streamlit.app](https://banki
 Demo GIF placeholder:
 
 ```md
-![Demo](docs/demo.gif)
+<img width="801" height="830" alt="image" src="https://github.com/user-attachments/assets/564797a2-57d1-4fc8-92b1-faded103d701" />
+<img width="801" height="830" alt="image" src="https://github.com/user-attachments/assets/7c2169c1-10e8-45af-beda-8e8b3ffbec97" />
+
 ```
 
-If you record one later, save it as `docs/demo.gif`.
 
 ## Architecture
 
