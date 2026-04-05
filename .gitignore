@@ -6,4 +6,7 @@ __pycache__/
 .pytest_cache/
 .streamlit/
 data/chroma_bank_transactions/
+eval/ragas_eval_results/
+*.bank.csv
+*.bank.json
 docs/demo.gif
