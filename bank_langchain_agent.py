@@ -3,11 +3,14 @@ from __future__ import annotations
 import asyncio
 import argparse
 import json
+import os
 from collections import defaultdict
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
+
+os.environ.setdefault('PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION', 'python')
 
 import chromadb
 from langchain_core.output_parsers import StrOutputParser
@@ -759,3 +762,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
