@@ -9,6 +9,7 @@ from typing import Any
 
 os.environ.setdefault("PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION", "python")
 
+import chromadb
 import pandas as pd
 import streamlit as st
 
@@ -35,6 +36,7 @@ st.set_page_config(
 PROJECT_ROOT = Path(__file__).resolve().parent
 SAMPLE_STATEMENT_PATH = PROJECT_ROOT / "sample_data" / "sample_bank_statement.csv"
 LIVE_APP_URL = "https://bankinsightsapppy-hewucidkqvbxdmstv84vyu.streamlit.app/"
+UPLOADS_ENABLED = os.getenv("ENABLE_STATEMENT_UPLOADS", "false").strip().lower() == "true"
 EXAMPLE_PROMPTS = [
     "Show all large UPI debits",
     "Group my spending by merchant type",
@@ -256,6 +258,10 @@ def ensure_default_data_loaded() -> None:
     if not SAMPLE_STATEMENT_PATH.exists():
         return
 
+    if not UPLOADS_ENABLED:
+        load_sample_dataset(replace_existing=True)
+        return
+
     try:
         store = TransactionStore(
             persist_directory=DEFAULT_CHROMA_DIR,
@@ -286,7 +292,14 @@ def ensure_default_data_loaded() -> None:
     )
 
 
-def load_sample_dataset() -> str:
+def load_sample_dataset(replace_existing: bool = False) -> str:
+    if replace_existing:
+        reset_client = chromadb.PersistentClient(path=str(DEFAULT_CHROMA_DIR))
+        try:
+            reset_client.delete_collection(DEFAULT_COLLECTION)
+        except Exception:
+            pass
+
     transactions = parse_transactions(
         csv_path=SAMPLE_STATEMENT_PATH,
         date_column=None,
@@ -743,11 +756,17 @@ def main() -> None:
                 st.session_state.queued_prompt = None
                 st.session_state.status_message = "Chat history cleared."
 
-        uploaded_file = st.file_uploader("Bank statement CSV", type=["csv"])
-        if uploaded_file is not None and st.button("Process Statement", use_container_width=True):
-            with st.spinner("Parsing statement, generating embeddings, and updating ChromaDB..."):
-                st.session_state.status_message = ingest_uploaded_csv(uploaded_file)
-            agent, financial_tools = get_finance_agent()
+        if UPLOADS_ENABLED:
+            uploaded_file = st.file_uploader("Bank statement CSV", type=["csv"])
+            if uploaded_file is not None and st.button("Process Statement", use_container_width=True):
+                with st.spinner("Parsing statement, generating embeddings, and updating ChromaDB..."):
+                    st.session_state.status_message = ingest_uploaded_csv(uploaded_file)
+                agent, financial_tools = get_finance_agent()
+        else:
+            st.info(
+                "Uploads are disabled in this public demo to avoid storing personal financial data. "
+                "Use `Try Sample Data` here, or enable uploads locally with `ENABLE_STATEMENT_UPLOADS=true`."
+            )
 
         if st.session_state.status_message:
             st.success(st.session_state.status_message)
