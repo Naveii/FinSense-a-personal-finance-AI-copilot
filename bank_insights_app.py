@@ -38,6 +38,7 @@ st.set_page_config(
 PROJECT_ROOT = Path(__file__).resolve().parent
 SAMPLE_STATEMENT_PATH = PROJECT_ROOT / "sample_data" / "sample_bank_statement.csv"
 LIVE_APP_URL = "https://bankinsightsapppy-hewucidkqvbxdmstv84vyu.streamlit.app/"
+DEMO_DATA_VERSION = "sample-v1"
 EXAMPLE_PROMPTS = [
     "Show all large UPI debits",
     "Group my spending by merchant type",
@@ -258,11 +259,21 @@ def tool_output_to_dataframe(tool_output: dict[str, Any]) -> pd.DataFrame:
 def ensure_default_data_loaded() -> None:
     if not SAMPLE_STATEMENT_PATH.exists():
         return
-    ensure_session_state_defaults()
-    if st.session_state.get("default_sample_loaded"):
-        return
+    version_marker = DEFAULT_CHROMA_DIR / ".demo_data_version"
+    if version_marker.exists() and version_marker.read_text(encoding="utf-8").strip() == DEMO_DATA_VERSION:
+        try:
+            store = TransactionStore(
+                persist_directory=DEFAULT_CHROMA_DIR,
+                collection_name=DEFAULT_COLLECTION,
+                embedding_model_name=DEFAULT_EMBEDDING_MODEL,
+            )
+            if store.collection.count() > 0:
+                return
+        except Exception:
+            pass
     load_sample_dataset(replace_existing=True)
-    st.session_state.default_sample_loaded = True
+    DEFAULT_CHROMA_DIR.mkdir(parents=True, exist_ok=True)
+    version_marker.write_text(DEMO_DATA_VERSION, encoding="utf-8")
 
 
 def load_sample_dataset(replace_existing: bool = False) -> str:
@@ -298,7 +309,6 @@ def ensure_session_state_defaults() -> None:
     st.session_state.setdefault("session_storage_dir", None)
     st.session_state.setdefault("session_collection_name", None)
     st.session_state.setdefault("using_session_data", False)
-    st.session_state.setdefault("default_sample_loaded", False)
 
 
 def reset_session_storage() -> None:
