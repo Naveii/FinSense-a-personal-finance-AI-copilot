@@ -52,6 +52,13 @@ def format_currency(value: Any) -> str:
     return f"{sign}INR {abs(number):,.2f}"
 
 
+def format_percent(value: Any) -> str:
+    try:
+        return f"{float(value):.2f}%"
+    except (TypeError, ValueError):
+        return "0.00%"
+
+
 def format_month_range(dates: list[str]) -> str:
     parsed = []
     for value in dates:
@@ -165,6 +172,8 @@ def format_support_table(table: pd.DataFrame) -> pd.DataFrame:
         formatted["Distance"] = formatted["Distance"].apply(
             lambda value: f"{float(value):.3f}" if value not in (None, "") else ""
         )
+    if "Transaction Count" in formatted.columns:
+        formatted["Transaction Count"] = formatted["Transaction Count"].astype(str)
     return formatted
 
 
@@ -277,6 +286,28 @@ def ensure_default_data_loaded() -> None:
     )
 
 
+def load_sample_dataset() -> str:
+    transactions = parse_transactions(
+        csv_path=SAMPLE_STATEMENT_PATH,
+        date_column=None,
+        description_column=None,
+        debit_column=None,
+        credit_column=None,
+        amount_column=None,
+        balance_column=None,
+        reference_column=None,
+    )
+    upsert_transactions(
+        transactions=transactions,
+        persist_directory=DEFAULT_CHROMA_DIR,
+        collection_name=DEFAULT_COLLECTION,
+        embedding_model=DEFAULT_EMBEDDING_MODEL,
+        batch_size=100,
+    )
+    get_finance_agent.clear()
+    return f"Loaded {len(transactions)} sample transactions."
+
+
 @st.cache_resource(show_spinner=False)
 def get_finance_agent() -> tuple[LangChainFinanceAgent, FinancialTools]:
     ensure_default_data_loaded()
@@ -324,34 +355,89 @@ def ingest_uploaded_csv(uploaded_file) -> str:
     return f"Loaded {len(transactions)} transactions from {uploaded_file.name}."
 
 
+def metric_card_html(label: str, value: str, tone: str = "default", subtitle: str = "") -> str:
+    tone_class = f"metric-card metric-{tone}"
+    subtitle_html = f"<div class='metric-subtitle'>{subtitle}</div>" if subtitle else ""
+    return (
+        f"<div class='{tone_class}'>"
+        f"<div class='metric-label'>{label}</div>"
+        f"<div class='metric-value'>{value}</div>"
+        f"{subtitle_html}"
+        f"</div>"
+    )
+
+
 def render_health_dashboard(financial_tools: FinancialTools) -> None:
     health_json = financial_tools.financial_health_tool().invoke({"query": "dashboard"})
     health_data = json.loads(health_json)
     metrics = health_data.get("metrics", {})
+    score = metrics.get("financial_health_score", "0")
 
-    st.subheader("Health Score")
-    score_col, savings_col = st.columns(2)
-    with score_col:
-        st.metric("Financial Health Score", metrics.get("financial_health_score", "0"))
-        st.caption(health_data.get("income_assumption", ""))
-    with savings_col:
-        st.metric("Net Savings", format_currency(metrics.get("net_savings", "0")))
-        st.metric("Savings Rate", f"{metrics.get('savings_rate_pct', '0')}%")
+    st.markdown("### Financial Health")
+    st.markdown(
+        """
+        <div class="section-kicker">A quick snapshot of income resilience, repayment pressure, and discretionary spend.</div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    emi_col, discretionary_col, income_col = st.columns(3)
-    with emi_col:
-        st.metric("EMI / Income", f"{metrics.get('emi_to_income_ratio_pct', '0')}%")
-    with discretionary_col:
-        st.metric(
-            "Discretionary Spend",
-            f"{metrics.get('discretionary_spend_pct', '0')}%",
+    hero_col, supporting_col = st.columns([1.05, 1.35], gap="medium")
+    with hero_col:
+        st.markdown(
+            metric_card_html(
+                "Financial Health Score",
+                score,
+                tone="primary",
+                subtitle=health_data.get("income_assumption", ""),
+            ),
+            unsafe_allow_html=True,
         )
+    with supporting_col:
+        top_row = st.columns(2, gap="small")
+        with top_row[0]:
+            st.markdown(
+                metric_card_html("Net Savings", format_currency(metrics.get("net_savings", "0"))),
+                unsafe_allow_html=True,
+            )
+        with top_row[1]:
+            st.markdown(
+                metric_card_html("Savings Rate", format_percent(metrics.get("savings_rate_pct", "0"))),
+                unsafe_allow_html=True,
+            )
+        bottom_row = st.columns(2, gap="small")
+        with bottom_row[0]:
+            st.markdown(
+                metric_card_html(
+                    "EMI / Income",
+                    format_percent(metrics.get("emi_to_income_ratio_pct", "0")),
+                ),
+                unsafe_allow_html=True,
+            )
+        with bottom_row[1]:
+            st.markdown(
+                metric_card_html(
+                    "Discretionary Spend",
+                    format_percent(metrics.get("discretionary_spend_pct", "0")),
+                ),
+                unsafe_allow_html=True,
+            )
+
+    income_col, expense_col = st.columns(2, gap="small")
     with income_col:
-        st.metric("Total Income", format_currency(metrics.get("total_income", "0")))
+        st.markdown(
+            metric_card_html("Total Income", format_currency(metrics.get("total_income", "0"))),
+            unsafe_allow_html=True,
+        )
+    with expense_col:
+        st.markdown(
+            metric_card_html("Total Expenses", format_currency(metrics.get("total_expenses", "0"))),
+            unsafe_allow_html=True,
+        )
 
     st.subheader("Metric Breakdown")
     metrics_df = tool_output_to_dataframe(health_data)
-    st.dataframe(metrics_df, use_container_width=True, hide_index=True)
+    with st.expander("See metric breakdown", expanded=False):
+        st.dataframe(metrics_df, use_container_width=True, hide_index=True)
 
 
 def run_prompt(agent: LangChainFinanceAgent, prompt: str) -> None:
@@ -373,14 +459,16 @@ def run_prompt(agent: LangChainFinanceAgent, prompt: str) -> None:
                 "answer_text",
                 generate_chat_answer(response["selected_tool"], response["tool_output"]),
             )
+            st.markdown("#### Summary")
             st.markdown(summary)
-            if citations:
-                st.markdown("**Citations**")
-                for citation in citations:
-                    st.caption(citation)
             table = format_support_table(tool_output_to_dataframe(response["tool_output"]))
+            if citations:
+                with st.expander("Evidence and citations", expanded=True):
+                    for citation in citations:
+                        st.caption(citation)
             if not table.empty:
-                st.dataframe(table, use_container_width=True, hide_index=True)
+                with st.expander("Supporting transactions", expanded=True):
+                    st.dataframe(table, use_container_width=True, hide_index=True)
 
     st.session_state.messages.append(
         {
@@ -393,20 +481,36 @@ def run_prompt(agent: LangChainFinanceAgent, prompt: str) -> None:
 
 
 def render_chat_panel(agent: LangChainFinanceAgent) -> None:
-    st.subheader("Chat")
-    st.caption("Ask about spending patterns, merchant categories, or financial health.")
+    st.markdown("### Finance Copilot")
+    st.markdown(
+        """
+        <div class="section-kicker">Ask natural questions about merchants, large debits, spending mix, or overall financial health.</div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     if "messages" not in st.session_state:
         st.session_state.messages = [
             {
                 "role": "assistant",
-                "content": "Ask a question like 'show all large UPI debits' or 'what is my financial health score'.",
+                "content": "Upload a statement or use the sample dataset, then ask about large debits, merchant patterns, or your health score.",
                 "citations": [],
                 "table": pd.DataFrame(),
             }
         ]
     if "queued_prompt" not in st.session_state:
         st.session_state.queued_prompt = None
+
+    st.markdown(
+        """
+        <div class="prompt-strip">
+            <span class="prompt-chip">Citation-backed answers</span>
+            <span class="prompt-chip">Merchant grouping</span>
+            <span class="prompt-chip">Health score analysis</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     prompt_columns = st.columns(len(EXAMPLE_PROMPTS))
     for index, example_prompt in enumerate(EXAMPLE_PROMPTS):
@@ -418,12 +522,17 @@ def render_chat_panel(agent: LangChainFinanceAgent) -> None:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
             if message.get("citations"):
-                st.markdown("**Citations**")
-                for citation in message["citations"]:
-                    st.caption(citation)
+                with st.expander("Evidence and citations", expanded=False):
+                    for citation in message["citations"]:
+                        st.caption(citation)
             table = message.get("table")
             if isinstance(table, pd.DataFrame) and not table.empty:
-                st.dataframe(format_support_table(table), use_container_width=True, hide_index=True)
+                with st.expander("Supporting transactions", expanded=False):
+                    st.dataframe(
+                        format_support_table(table),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
 
     prompt = st.chat_input("Ask about your transactions")
     if not prompt and st.session_state.queued_prompt:
@@ -437,49 +546,167 @@ def render_chat_panel(agent: LangChainFinanceAgent) -> None:
 
 
 def main() -> None:
+    if "status_message" not in st.session_state:
+        st.session_state.status_message = ""
+
     st.markdown(
         """
         <style>
         .stApp {
-            background: linear-gradient(180deg, #f8f2e7 0%, #f4f7fb 100%);
+            background:
+                radial-gradient(circle at top left, rgba(255, 224, 178, 0.35), transparent 28%),
+                linear-gradient(180deg, #f7f1e6 0%, #f4f7fb 55%, #edf3fb 100%);
+        }
+        .block-container {
+            padding-top: 2rem;
+            padding-bottom: 3rem;
         }
         div[data-testid="stChatMessage"] {
             background: rgba(255, 255, 255, 0.76);
             border: 1px solid rgba(31, 41, 55, 0.08);
             border-radius: 18px;
-            padding: 0.55rem 0.8rem;
+            padding: 0.7rem 0.9rem;
+            box-shadow: 0 12px 30px rgba(15, 23, 42, 0.05);
         }
-        div[data-testid="stMetric"] {
-            background: rgba(255, 255, 255, 0.78);
+        .hero-card, .panel-card {
+            background: rgba(255, 255, 255, 0.74);
+            border: 1px solid rgba(31, 41, 55, 0.07);
+            border-radius: 24px;
+            padding: 1rem 1.1rem;
+            box-shadow: 0 18px 44px rgba(15, 23, 42, 0.06);
+            backdrop-filter: blur(8px);
+        }
+        .hero-card h1 {
+            margin: 0;
+            font-size: 3.3rem;
+            line-height: 1.02;
+            color: #20253a;
+        }
+        .hero-card p {
+            margin: 0.65rem 0 0;
+            color: #5b6477;
+            font-size: 1rem;
+        }
+        .section-kicker {
+            margin-top: -0.2rem;
+            margin-bottom: 0.8rem;
+            color: #6a7284;
+            font-size: 0.96rem;
+        }
+        .metric-card {
+            background: rgba(255, 255, 255, 0.84);
             border: 1px solid rgba(31, 41, 55, 0.06);
-            border-radius: 16px;
-            padding: 0.5rem 0.8rem;
+            border-radius: 18px;
+            padding: 0.95rem 1rem;
+            min-height: 120px;
+            box-shadow: 0 10px 28px rgba(15, 23, 42, 0.04);
+        }
+        .metric-primary {
+            background: linear-gradient(135deg, rgba(255,255,255,0.95), rgba(255,243,224,0.92));
+            min-height: 260px;
+        }
+        .metric-label {
+            color: #5b6477;
+            font-size: 0.92rem;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+        }
+        .metric-value {
+            color: #1f2a44;
+            font-size: 2rem;
+            font-weight: 700;
+            margin-top: 0.35rem;
+            line-height: 1.08;
+        }
+        .metric-primary .metric-value {
+            font-size: 4.3rem;
+            margin-top: 1rem;
+        }
+        .metric-subtitle {
+            margin-top: 1rem;
+            color: #6a7284;
+            font-size: 0.96rem;
+            line-height: 1.45;
+        }
+        .prompt-strip {
+            display: flex;
+            gap: 0.45rem;
+            flex-wrap: wrap;
+            margin: 0.2rem 0 1rem;
+        }
+        .prompt-chip {
+            background: rgba(255,255,255,0.76);
+            border: 1px solid rgba(31,41,55,0.08);
+            border-radius: 999px;
+            padding: 0.35rem 0.7rem;
+            color: #4c5567;
+            font-size: 0.88rem;
         }
         div[data-testid="stButton"] > button {
             border-radius: 999px;
             border: 1px solid rgba(31, 41, 55, 0.08);
+            min-height: 2.6rem;
+        }
+        div[data-testid="stFileUploader"] section {
+            border-radius: 18px;
+            background: rgba(255, 255, 255, 0.72);
+        }
+        div[data-testid="stExpander"] {
+            border-radius: 16px;
         }
         </style>
         """,
         unsafe_allow_html=True,
     )
-    st.title("Bank Statement Insights")
-    st.caption("Upload a CSV, review your financial health, and chat with citation-backed transaction answers.")
+    st.markdown(
+        """
+        <div class="hero-card">
+            <h1>Bank Statement Insights</h1>
+            <p>Upload a statement, review your financial health, and chat with a finance copilot that answers with evidence from your transactions.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     st.markdown(f"[Open live app]({LIVE_APP_URL})")
 
     left_col, right_col = st.columns([0.92, 1.08], gap="large")
     agent, financial_tools = get_finance_agent()
 
     with left_col:
-        st.subheader("Upload CSV")
-        uploaded_file = st.file_uploader("Bank statement CSV", type=["csv"])
-        if uploaded_file is not None:
-            if st.button("Process Statement", use_container_width=True):
-                with st.spinner("Embedding transactions and updating ChromaDB..."):
-                    message = ingest_uploaded_csv(uploaded_file)
-                st.success(message)
+        st.markdown("### Workspace")
+        st.markdown(
+            """
+            <div class="section-kicker">Start with a sample statement or upload your own CSV, then review the dashboard before asking questions.</div>
+            """,
+            unsafe_allow_html=True,
+        )
+        action_col, reset_col = st.columns(2, gap="small")
+        with action_col:
+            if st.button("Try Sample Data", use_container_width=True):
+                with st.spinner("Loading sample transactions..."):
+                    st.session_state.status_message = load_sample_dataset()
                 agent, financial_tools = get_finance_agent()
+        with reset_col:
+            if st.button("Reset Chat", use_container_width=True):
+                st.session_state.messages = [
+                    {
+                        "role": "assistant",
+                        "content": "Chat reset. Ask about large debits, merchant patterns, or your financial health.",
+                        "citations": [],
+                        "table": pd.DataFrame(),
+                    }
+                ]
+                st.session_state.queued_prompt = None
+                st.session_state.status_message = "Chat history cleared."
 
+        uploaded_file = st.file_uploader("Bank statement CSV", type=["csv"])
+        if uploaded_file is not None and st.button("Process Statement", use_container_width=True):
+            with st.spinner("Parsing statement, generating embeddings, and updating ChromaDB..."):
+                st.session_state.status_message = ingest_uploaded_csv(uploaded_file)
+            agent, financial_tools = get_finance_agent()
+
+        if st.session_state.status_message:
+            st.success(st.session_state.status_message)
         render_health_dashboard(financial_tools)
 
     with right_col:
