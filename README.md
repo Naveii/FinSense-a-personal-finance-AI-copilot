@@ -83,10 +83,22 @@ bank-statement-insights/
 
 ## Setup
 
-Use the existing virtual environment:
+Create and activate a virtual environment:
 
 ```powershell
-D:\Documents\.venv\Scripts\Activate.ps1
+python -m venv .venv
+```
+
+PowerShell:
+
+```powershell
+.venv\Scripts\Activate.ps1
+```
+
+macOS/Linux:
+
+```bash
+source .venv/bin/activate
 ```
 
 Install runtime dependencies:
@@ -101,21 +113,31 @@ Install RAG evaluation extras if needed:
 pip install -r requirements-eval.txt
 ```
 
+Optional configuration:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+```bash
+cp .env.example .env
+```
+
 ## Run Locally
 
 Start the Streamlit app:
 
 ```powershell
-D:\Documents\.venv\Scripts\streamlit.exe run D:\Documents\bank-statement-insights\bank_insights_app.py
+streamlit run bank_insights_app.py
 ```
 
 Useful CLI commands:
 
 ```powershell
-D:\Documents\.venv\Scripts\python.exe D:\Documents\bank-statement-insights\bank_statement_to_chroma.py "D:\path\to\statement.csv"
-D:\Documents\.venv\Scripts\python.exe D:\Documents\bank-statement-insights\query_bank_transactions.py "show all large UPI debits"
-D:\Documents\.venv\Scripts\python.exe D:\Documents\bank-statement-insights\bank_langchain_agent.py "what is my financial health score?"
-D:\Documents\.venv\Scripts\python.exe D:\Documents\bank-statement-insights\evaluate_finance_agent_ragas.py
+python bank_statement_to_chroma.py "/path/to/statement.csv"
+python query_bank_transactions.py "show all large UPI debits"
+python bank_langchain_agent.py "what is my financial health score?"
+python evaluate_finance_agent_ragas.py
 ```
 
 ## Safe Demo Data

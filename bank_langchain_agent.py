@@ -22,10 +22,14 @@ from sentence_transformers import SentenceTransformer
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 DATA_DIR = PROJECT_ROOT / "data"
-DEFAULT_CHROMA_DIR = DATA_DIR / "chroma_bank_transactions"
-DEFAULT_COLLECTION = "bank_transactions"
-DEFAULT_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-DEFAULT_AGENT_MODEL = "Qwen/Qwen2.5-0.5B-Instruct"
+DEFAULT_CHROMA_DIR = Path(
+    os.getenv("CHROMA_PERSIST_DIR", str(DATA_DIR / "chroma_bank_transactions"))
+)
+DEFAULT_COLLECTION = os.getenv("CHROMA_COLLECTION_NAME", "bank_transactions")
+DEFAULT_EMBEDDING_MODEL = os.getenv(
+    "EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"
+)
+DEFAULT_AGENT_MODEL = os.getenv("AGENT_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
 
 CATEGORY_OPTIONS = [
     "income",
