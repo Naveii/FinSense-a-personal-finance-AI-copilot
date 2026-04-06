@@ -411,32 +411,26 @@ def render_health_dashboard(financial_tools: FinancialTools) -> None:
             metric_card_html(
                 "Net Savings",
                 format_currency(metrics.get("net_savings", "0")),
-                size="compact",
             ),
             metric_card_html(
                 "Savings Rate",
                 format_percent(metrics.get("savings_rate_pct", "0")),
-                size="compact",
             ),
             metric_card_html(
                 "EMI / Income",
                 format_percent(metrics.get("emi_to_income_ratio_pct", "0")),
-                size="compact",
             ),
             metric_card_html(
                 "Discretionary Spend",
                 format_percent(metrics.get("discretionary_spend_pct", "0")),
-                size="compact",
             ),
             metric_card_html(
                 "Total Income",
                 format_currency(metrics.get("total_income", "0")),
-                size="wide",
             ),
             metric_card_html(
                 "Total Expenses",
                 format_currency(metrics.get("total_expenses", "0")),
-                size="wide",
             ),
         ]
     )
@@ -607,7 +601,7 @@ def main() -> None:
             border: 1px solid rgba(31, 41, 55, 0.06);
             border-radius: 22px;
             padding: 1.05rem 1.1rem;
-            min-height: 150px;
+            min-height: 156px;
             box-shadow: 0 10px 28px rgba(15, 23, 42, 0.04);
             display: flex;
             flex-direction: column;
@@ -617,7 +611,7 @@ def main() -> None:
         }
         .metric-primary {
             background: linear-gradient(135deg, rgba(255,255,255,0.95), rgba(255,243,224,0.92));
-            min-height: 312px;
+            min-height: 260px;
             border-color: rgba(245, 158, 11, 0.12);
         }
         .metric-label {
@@ -637,17 +631,11 @@ def main() -> None:
             word-break: break-word;
         }
         .metric-primary .metric-value {
-            font-size: clamp(3.9rem, 6vw, 5.1rem);
-            margin-top: 1.2rem;
+            font-size: clamp(3.2rem, 5.1vw, 4.4rem);
+            margin-top: 0.9rem;
             white-space: nowrap;
             overflow-wrap: normal;
             word-break: normal;
-        }
-        .metric-size-compact .metric-value {
-            font-size: clamp(1.3rem, 1.75vw, 1.95rem);
-        }
-        .metric-size-wide .metric-value {
-            font-size: clamp(1.75rem, 2.2vw, 2.45rem);
         }
         .metric-subtitle {
             margin-top: 1rem;
@@ -657,28 +645,20 @@ def main() -> None:
         }
         .dashboard-grid {
             display: grid;
-            grid-template-columns: minmax(0, 1.3fr) repeat(2, minmax(0, 1fr));
+            grid-template-columns: repeat(2, minmax(0, 1fr));
             gap: 1rem;
             align-items: stretch;
             margin: 0.8rem 0 1rem;
         }
         .metric-size-hero {
-            grid-row: span 2;
-        }
-        .metric-size-compact {
-            min-height: 150px;
-        }
-        .metric-size-wide {
-            min-height: 152px;
+            grid-column: 1 / -1;
         }
         @media (max-width: 1100px) {
             .dashboard-grid {
                 grid-template-columns: repeat(2, minmax(0, 1fr));
             }
             .metric-size-hero {
-                grid-column: 1 / -1;
-                grid-row: auto;
-                min-height: 240px;
+                min-height: 236px;
             }
         }
         @media (max-width: 720px) {
@@ -738,7 +718,7 @@ def main() -> None:
     )
     st.markdown(f"[Open live app]({LIVE_APP_URL})")
 
-    left_col, right_col = st.columns([0.92, 1.08], gap="large")
+    left_col, right_col = st.columns([1.08, 0.92], gap="large")
     agent, financial_tools = get_finance_agent()
 
     with left_col:
