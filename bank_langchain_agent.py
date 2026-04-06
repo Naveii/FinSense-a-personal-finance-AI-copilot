@@ -4,8 +4,9 @@ import asyncio
 import argparse
 import json
 import os
+import re
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
@@ -86,6 +87,96 @@ PERSONAL_FINANCE_KEYWORDS = (
     "payment",
     "payments",
 )
+
+STOPWORDS = {
+    "show",
+    "find",
+    "list",
+    "all",
+    "my",
+    "me",
+    "for",
+    "from",
+    "with",
+    "that",
+    "than",
+    "under",
+    "over",
+    "between",
+    "during",
+    "within",
+    "only",
+    "just",
+    "what",
+    "which",
+    "when",
+    "where",
+    "much",
+    "many",
+    "spent",
+    "spend",
+    "payments",
+    "payment",
+    "transactions",
+    "transaction",
+    "debits",
+    "debit",
+    "credits",
+    "credit",
+    "large",
+    "largest",
+    "highest",
+    "biggest",
+    "total",
+    "sum",
+    "merchant",
+    "category",
+    "categories",
+    "group",
+    "score",
+    "health",
+    "financial",
+    "finance",
+    "rate",
+    "ratio",
+    "income",
+    "loan",
+    "loans",
+    "emi",
+    "expense",
+    "expenses",
+    "savings",
+    "statement",
+    "bank",
+    "upi",
+}
+
+MONTH_LOOKUP = {
+    "jan": 1,
+    "january": 1,
+    "feb": 2,
+    "february": 2,
+    "mar": 3,
+    "march": 3,
+    "apr": 4,
+    "april": 4,
+    "may": 5,
+    "jun": 6,
+    "june": 6,
+    "jul": 7,
+    "july": 7,
+    "aug": 8,
+    "august": 8,
+    "sep": 9,
+    "sept": 9,
+    "september": 9,
+    "oct": 10,
+    "october": 10,
+    "nov": 11,
+    "november": 11,
+    "dec": 12,
+    "december": 12,
+}
 
 RETRIEVAL_HINTS = (
     "show",
@@ -199,6 +290,145 @@ def health_score_band(score: Decimal) -> str:
     if score >= Decimal("40"):
         return "mixed"
     return "stretched"
+
+
+def parse_iso_date(value: str) -> datetime | None:
+    try:
+        return datetime.strptime(value, "%Y-%m-%d")
+    except (TypeError, ValueError):
+        return None
+
+
+def infer_reference_year(transactions: list[dict[str, Any]]) -> int | None:
+    years = []
+    for transaction in transactions:
+        parsed = parse_iso_date(str(transaction.get("metadata", {}).get("date", "")))
+        if parsed:
+            years.append(parsed.year)
+    return max(years) if years else None
+
+
+def extract_month_range(question: str, reference_year: int | None) -> tuple[str | None, str | None]:
+    normalized = question.lower()
+    found: list[int] = []
+    for token, month_number in MONTH_LOOKUP.items():
+        if token in normalized:
+            if month_number not in found:
+                found.append(month_number)
+
+    if not found or reference_year is None:
+        return None, None
+
+    start_month = min(found)
+    end_month = max(found)
+    start = datetime(reference_year, start_month, 1)
+    if end_month == 12:
+        end = datetime(reference_year, 12, 31)
+    else:
+        end = datetime(reference_year, end_month + 1, 1) - timedelta(days=1)
+    return start.date().isoformat(), end.date().isoformat()
+
+
+def extract_amount_thresholds(question: str) -> tuple[Decimal | None, Decimal | None]:
+    normalized = question.lower().replace(",", "")
+    above_match = re.search(r"(?:above|over|greater than|more than)\s+(\d+(?:\.\d+)?)", normalized)
+    below_match = re.search(r"(?:below|under|less than)\s+(\d+(?:\.\d+)?)", normalized)
+    min_amount = Decimal(above_match.group(1)) if above_match else None
+    max_amount = Decimal(below_match.group(1)) if below_match else None
+    return min_amount, max_amount
+
+
+def extract_merchant_terms(question: str) -> list[str]:
+    preferred_match = re.search(
+        r"(?:on|to|from|at)\s+([a-z0-9_@.-]+(?:\s+[a-z0-9_@.-]+)?)",
+        question.lower(),
+    )
+    if preferred_match:
+        phrase = re.sub(r"[^a-z0-9\s]", " ", preferred_match.group(1))
+        preferred_terms = [token for token in phrase.split() if len(token) > 2]
+        preferred_terms = [
+            token
+            for token in preferred_terms
+            if token not in STOPWORDS and token not in MONTH_LOOKUP
+        ]
+        if preferred_terms:
+            return preferred_terms
+
+    normalized = re.sub(r"[^a-z0-9\s]", " ", question.lower())
+    tokens = [token for token in normalized.split() if len(token) > 2]
+    return [
+        token
+        for token in tokens
+        if token not in STOPWORDS and token not in MONTH_LOOKUP
+    ]
+
+
+def build_query_filters(question: str, transactions: list[dict[str, Any]]) -> dict[str, Any]:
+    normalized = question.lower()
+    min_amount, max_amount = extract_amount_thresholds(normalized)
+    transaction_type = None
+    if "debit" in normalized or "debits" in normalized:
+        transaction_type = "debit"
+    elif "credit" in normalized or "credits" in normalized:
+        transaction_type = "credit"
+
+    start_date, end_date = extract_month_range(normalized, infer_reference_year(transactions))
+    merchant_terms = extract_merchant_terms(normalized)
+
+    return {
+        "transaction_type": transaction_type,
+        "min_amount": str(min_amount) if min_amount is not None else None,
+        "max_amount": str(max_amount) if max_amount is not None else None,
+        "start_date": start_date,
+        "end_date": end_date,
+        "merchant_terms": merchant_terms,
+    }
+
+
+def record_matches_filters(record: dict[str, Any], filters: dict[str, Any]) -> bool:
+    metadata = record.get("metadata", {})
+    description = str(metadata.get("description", "") or "").lower()
+    amount = abs(parse_amount(metadata.get("amount")))
+    transaction_type = str(metadata.get("transaction_type", "") or "").lower()
+    date_value = str(metadata.get("date", "") or "")
+
+    if filters.get("transaction_type") and transaction_type != filters["transaction_type"]:
+        return False
+
+    min_amount = filters.get("min_amount")
+    if min_amount is not None and amount < parse_amount(min_amount):
+        return False
+
+    max_amount = filters.get("max_amount")
+    if max_amount is not None and amount > parse_amount(max_amount):
+        return False
+
+    start_date = filters.get("start_date")
+    if start_date and date_value < start_date:
+        return False
+
+    end_date = filters.get("end_date")
+    if end_date and date_value > end_date:
+        return False
+
+    merchant_terms = filters.get("merchant_terms") or []
+    if merchant_terms and not any(term in description for term in merchant_terms):
+        return False
+
+    return True
+
+
+def sort_records_for_question(records: list[dict[str, Any]], question: str) -> list[dict[str, Any]]:
+    normalized = question.lower()
+    if any(token in normalized for token in ("largest", "highest", "biggest", "max")):
+        return sorted(
+            records,
+            key=lambda record: abs(parse_amount(record.get("metadata", {}).get("amount"))),
+            reverse=True,
+        )
+    if any(token in normalized for token in ("latest", "recent", "newest")):
+        return sorted(records, key=lambda record: str(record.get("metadata", {}).get("date", "")), reverse=True)
+    return records
 
 
 class AsyncCompatibleChatHuggingFace(ChatHuggingFace):
@@ -417,7 +647,44 @@ class FinancialTools:
         @tool("rag_retrieval_tool")
         def rag_retrieval_tool(query: str, top_k: int = 12) -> str:
             """Semantic retrieval over embedded transactions. Use for lookup, search, and evidence gathering."""
-            return json.dumps(self.store.semantic_search(query=query, top_k=top_k), indent=2)
+            semantic_matches = self.store.semantic_search(query=query, top_k=max(top_k * 3, 24)).get(
+                "matches", []
+            )
+            all_transactions = self.store.all_transactions()
+            filters = build_query_filters(query, all_transactions)
+
+            filtered_transactions = [
+                transaction
+                for transaction in all_transactions
+                if record_matches_filters(transaction, filters)
+            ]
+
+            if filters.get("merchant_terms") or filters.get("min_amount") or filters.get("max_amount") or filters.get("start_date") or filters.get("transaction_type"):
+                matched_ids = {transaction["transaction_id"] for transaction in filtered_transactions}
+                records = [
+                    match for match in semantic_matches if match["transaction_id"] in matched_ids
+                ]
+                if not records:
+                    records = filtered_transactions
+            else:
+                records = semantic_matches
+
+            records = sort_records_for_question(records, query)[:top_k]
+            total_amount = sum(
+                (abs(parse_amount(record.get("metadata", {}).get("amount"))) for record in records),
+                Decimal("0"),
+            )
+            result = {
+                "query": query,
+                "top_k": top_k,
+                "matches": records,
+                "applied_filters": filters,
+                "aggregate": {
+                    "count": len(records),
+                    "total_amount": str(total_amount),
+                },
+            }
+            return json.dumps(result, indent=2)
 
         return rag_retrieval_tool
 
@@ -427,6 +694,7 @@ class FinancialTools:
             """Group transactions by merchant type and summarize spending using an LLM classifier."""
             transactions = self.store.all_transactions()
             if query:
+                filters = build_query_filters(query, transactions)
                 matched_ids = {
                     match["transaction_id"]
                     for match in self.store.semantic_search(query=query, top_k=min(25, len(transactions))).get("matches", [])
@@ -434,7 +702,7 @@ class FinancialTools:
                 transactions = [
                     transaction
                     for transaction in transactions
-                    if transaction["transaction_id"] in matched_ids
+                    if transaction["transaction_id"] in matched_ids or record_matches_filters(transaction, filters)
                 ]
 
             category_totals: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
@@ -581,6 +849,7 @@ def build_citations(selected_tool: str, tool_output: dict[str, Any]) -> list[str
     if selected_tool == "rag_retrieval_tool":
         matches = tool_output.get("matches", [])
         if matches:
+            filters = tool_output.get("applied_filters", {})
             dates = [
                 match.get("metadata", {}).get("date", "")
                 for match in matches
@@ -594,6 +863,20 @@ def build_citations(selected_tool: str, tool_output: dict[str, Any]) -> list[str
             citations.append(
                 f"Based on {len(matches)} retrieved transactions related to {merchant_name_from_description(descriptions[0]) if descriptions else 'matched merchants'} across {format_month_range(dates)}."
             )
+            if filters:
+                filter_parts = []
+                if filters.get("transaction_type"):
+                    filter_parts.append(filters["transaction_type"])
+                if filters.get("min_amount"):
+                    filter_parts.append(f"above INR {filters['min_amount']}")
+                if filters.get("max_amount"):
+                    filter_parts.append(f"below INR {filters['max_amount']}")
+                if filters.get("start_date") and filters.get("end_date"):
+                    filter_parts.append(f"between {filters['start_date']} and {filters['end_date']}")
+                if filters.get("merchant_terms"):
+                    filter_parts.append("matching " + ", ".join(filters["merchant_terms"]))
+                if filter_parts:
+                    citations.append("Applied filters: " + "; ".join(filter_parts) + ".")
             for match in matches[:3]:
                 metadata = match.get("metadata", {})
                 citations.append(
@@ -662,6 +945,8 @@ def build_agent_answer(question: str, selected_tool: str, tool_output: dict[str,
         matches = tool_output.get("matches", [])
         if not matches:
             return "I could not find matching transactions for that question."
+        aggregate = tool_output.get("aggregate", {})
+        applied_filters = tool_output.get("applied_filters", {})
 
         debit_matches = [
             match
@@ -701,6 +986,15 @@ def build_agent_answer(question: str, selected_tool: str, tool_output: dict[str,
             )
             return f"The total across {len(candidate_pool)} matching transactions for {merchant} is {format_currency(total)}."
 
+        if any(token in question_lower for token in ("spent on", "payments to", "paid to")):
+            total = parse_amount(aggregate.get("total_amount", "0"))
+            merchant = merchant_name_from_description(
+                str(matches[0].get("metadata", {}).get("description", ""))
+            )
+            return (
+                f"You spent {format_currency(total)} across {len(matches)} matching transactions for {merchant}."
+            )
+
         top_match = matches[0]
         metadata = top_match.get("metadata", {})
         amount_values = [
@@ -708,10 +1002,20 @@ def build_agent_answer(question: str, selected_tool: str, tool_output: dict[str,
             for match in matches
         ]
         total = sum(amount_values, Decimal("0"))
+        filter_summary = []
+        if applied_filters.get("start_date") and applied_filters.get("end_date"):
+            filter_summary.append(
+                f"between {applied_filters['start_date']} and {applied_filters['end_date']}"
+            )
+        if applied_filters.get("min_amount"):
+            filter_summary.append(f"above INR {applied_filters['min_amount']}")
         return (
             f"I found {len(matches)} relevant transactions totaling {format_currency(total)}. "
+            + (f"These results are filtered {' and '.join(filter_summary)}. " if filter_summary else "")
+            + (
             f"The strongest match is {metadata.get('description', 'a transaction')} on "
             f"{metadata.get('date', 'an unknown date')} for {format_currency(metadata.get('amount'))}."
+            )
         )
 
     if selected_tool == "spending_category_analyser":
