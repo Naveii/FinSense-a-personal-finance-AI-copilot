@@ -580,24 +580,25 @@ def main() -> None:
             background: rgba(255, 255, 255, 0.74);
             border: 1px solid rgba(31, 41, 55, 0.07);
             border-radius: 24px;
-            padding: 1rem 1.1rem;
+            padding: 1.1rem 1.2rem;
             box-shadow: 0 18px 44px rgba(15, 23, 42, 0.06);
             backdrop-filter: blur(8px);
         }
         .hero-card h1 {
             margin: 0;
-            font-size: 3.3rem;
+            font-size: clamp(2.5rem, 5vw, 3.4rem);
             line-height: 1.02;
             color: #20253a;
         }
         .hero-card p {
-            margin: 0.65rem 0 0;
+            margin: 0.75rem 0 0;
             color: #5b6477;
-            font-size: 1rem;
+            font-size: 1.02rem;
+            max-width: 58rem;
         }
         .section-kicker {
             margin-top: -0.2rem;
-            margin-bottom: 0.8rem;
+            margin-bottom: 0.95rem;
             color: #6a7284;
             font-size: 0.96rem;
         }
@@ -605,7 +606,7 @@ def main() -> None:
             background: rgba(255, 255, 255, 0.84);
             border: 1px solid rgba(31, 41, 55, 0.06);
             border-radius: 22px;
-            padding: 1rem 1.05rem;
+            padding: 1.05rem 1.1rem;
             min-height: 150px;
             box-shadow: 0 10px 28px rgba(15, 23, 42, 0.04);
             display: flex;
@@ -617,6 +618,7 @@ def main() -> None:
         .metric-primary {
             background: linear-gradient(135deg, rgba(255,255,255,0.95), rgba(255,243,224,0.92));
             min-height: 312px;
+            border-color: rgba(245, 158, 11, 0.12);
         }
         .metric-label {
             color: #5b6477;
@@ -655,7 +657,7 @@ def main() -> None:
         }
         .dashboard-grid {
             display: grid;
-            grid-template-columns: minmax(0, 1.45fr) repeat(2, minmax(0, 1fr));
+            grid-template-columns: minmax(0, 1.3fr) repeat(2, minmax(0, 1fr));
             gap: 1rem;
             align-items: stretch;
             margin: 0.8rem 0 1rem;
@@ -663,8 +665,11 @@ def main() -> None:
         .metric-size-hero {
             grid-row: span 2;
         }
+        .metric-size-compact {
+            min-height: 150px;
+        }
         .metric-size-wide {
-            min-height: 138px;
+            min-height: 152px;
         }
         @media (max-width: 1100px) {
             .dashboard-grid {
@@ -689,7 +694,7 @@ def main() -> None:
             display: flex;
             gap: 0.45rem;
             flex-wrap: wrap;
-            margin: 0.2rem 0 1rem;
+            margin: 0.2rem 0 1.1rem;
         }
         .prompt-chip {
             background: rgba(255,255,255,0.76);
@@ -703,6 +708,7 @@ def main() -> None:
             border-radius: 999px;
             border: 1px solid rgba(31, 41, 55, 0.08);
             min-height: 2.6rem;
+            background: rgba(255,255,255,0.82);
         }
         div[data-testid="stFileUploader"] section {
             border-radius: 18px;
@@ -710,6 +716,12 @@ def main() -> None:
         }
         div[data-testid="stExpander"] {
             border-radius: 16px;
+        }
+        div[data-testid="stExpander"] details {
+            background: rgba(255,255,255,0.72);
+            border: 1px solid rgba(31,41,55,0.06);
+            border-radius: 16px;
+            padding: 0.2rem 0.55rem;
         }
         </style>
         """,
